@@ -109,6 +109,8 @@ export default function Dashboard() {
   const [history, setHistory]   = useState([]);
   const [relays, setRelays]     = useState({ r1:"OFF",r2:"OFF",r3:"OFF",r4:"OFF" });
   const [customer, setCustomer] = useState(null);
+  const [lastUpdated, setLastUpdated] = useState(null);
+  const [isOnline, setIsOnline] = useState(false);
   const navigate = useNavigate();
   const c = getColors(dark);
 
@@ -122,7 +124,18 @@ export default function Dashboard() {
     onValue(ref(db,"environment/temp"),   s=>setTemp(s.val()));
     onValue(ref(db,"environment/humidity"),s=>setHumidity(s.val()));
     onValue(ref(db,"device/relay"),       s=>{ const v=s.val(); if(v&&typeof v==='object') setRelays(v); else setRelays(p=>({...p,r1:v||"OFF"})); });
+    onValue(ref(db,"energy/lastUpdated"), s=>setLastUpdated(s.val()));
   }, []);
+
+  // Check every 2 seconds whether the last ESP32 timestamp is still "fresh"
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!lastUpdated) { setIsOnline(false); return; }
+      const nowInSeconds = Math.floor(Date.now() / 1000);
+      setIsOnline((nowInSeconds - lastUpdated) < 10);
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [lastUpdated]);
 
   const toggleRelay = key => { const u={...relays,[key]:relays[key]==="OFF"?"ON":"OFF"}; setRelays(u); set(ref(db,"device/relay"),u); };
   const handleLogout = async () => { await signOut(auth); navigate("/login"); };
@@ -199,7 +212,7 @@ export default function Dashboard() {
             {label:"Power Factor", val:"0.92"},
             {label:"Frequency",    val:"50.0 Hz"},
             {label:"Peak Power",   val:`${maxPow.toFixed(1)} W`},
-            {label:"Status",       val:"● Normal", color:"#00c896"},
+            {label:"Status",       val: isOnline ? "● Online" : "● Offline", color: isOnline ? "#00c896" : "#fb7185"},
           ].map((row,i,arr)=>(
             <div key={row.label} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"14px 0",borderBottom:i===arr.length-1?"none":`1px solid ${c.statBo}`}}>
               <div style={{fontSize:17,color:c.sub,fontWeight:500}}>{row.label}</div>
@@ -511,9 +524,9 @@ export default function Dashboard() {
 
           {/* Live Badge */}
           <div style={{marginTop:24,paddingTop:20,borderTop:`1px solid ${c.sideB}`}}>
-            <div style={{display:"flex",alignItems:"center",gap:8,padding:"10px 14px",background:"rgba(0,200,150,0.1)",border:"1px solid rgba(0,200,150,0.2)",borderRadius:10}}>
-              <div className="live-dot" style={{width:8,height:8,borderRadius:"50%",background:"#00c896"}}/>
-              <span style={{fontSize:14,color:"#00c896",fontWeight:600}}>System Online</span>
+            <div style={{display:"flex",alignItems:"center",gap:8,padding:"10px 14px",background:isOnline?"rgba(0,200,150,0.1)":"rgba(225,29,72,0.1)",border:isOnline?"1px solid rgba(0,200,150,0.2)":"1px solid rgba(225,29,72,0.2)",borderRadius:10}}>
+              <div className="live-dot" style={{width:8,height:8,borderRadius:"50%",background:isOnline?"#00c896":"#fb7185"}}/>
+              <span style={{fontSize:14,color:isOnline?"#00c896":"#fb7185",fontWeight:600}}>{isOnline?"System Online":"System Offline"}</span>
             </div>
           </div>
         </div>
