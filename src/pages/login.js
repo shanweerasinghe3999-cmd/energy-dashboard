@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { auth } from "../firebase/firebase";
-import { signInWithEmailAndPassword } from "firebase/auth";
+import { signInWithEmailAndPassword, sendPasswordResetEmail } from "firebase/auth";
 import { useNavigate } from "react-router-dom";
 
 const styles = `
@@ -24,10 +24,17 @@ const styles = `
   .field input::placeholder { color: #475569; }
   .btn { width: 100%; padding: 14px; background: linear-gradient(135deg, #00c896, #0070f3); border: none; border-radius: 10px; color: white; font-size: 14px; font-weight: 600; font-family: 'DM Sans', sans-serif; cursor: pointer; margin-top: 8px; transition: opacity 0.2s, transform 0.2s; letter-spacing: 0.5px; }
   .btn:hover { opacity: 0.9; transform: translateY(-1px); }
+  .btn-secondary { background: rgba(255,255,255,0.06); box-shadow: none; }
   .error { background: rgba(225,29,72,0.1); border: 1px solid rgba(225,29,72,0.2); border-radius: 8px; padding: 10px 14px; color: #fb7185; font-size: 12px; margin-bottom: 16px; }
+  .success { background: rgba(0,200,150,0.1); border: 1px solid rgba(0,200,150,0.25); border-radius: 8px; padding: 10px 14px; color: #00c896; font-size: 12px; margin-bottom: 16px; }
   .link { text-align: center; margin-top: 20px; font-size: 13px; color: #64748b; }
   .link a { color: #00c896; text-decoration: none; font-weight: 600; cursor: pointer; }
   .link a:hover { text-decoration: underline; }
+  .forgot-link { text-align: right; margin: -8px 0 16px; font-size: 12px; }
+  .forgot-link a { color: #64748b; text-decoration: none; cursor: pointer; }
+  .forgot-link a:hover { color: #00c896; text-decoration: underline; }
+  .reset-box { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+  .reset-title { font-family: 'Rajdhani', sans-serif; font-size: 16px; font-weight: 700; color: #e2e8f0; margin-bottom: 12px; }
   .divider { display: flex; align-items: center; gap: 12px; margin: 20px 0; }
   .divider-line { flex: 1; height: 1px; background: rgba(255,255,255,0.07); }
   .divider-text { font-size: 11px; color: #475569; }
@@ -39,6 +46,13 @@ function Login() {
   const [error, setError]       = useState("");
   const [loading, setLoading]   = useState(false);
   const navigate = useNavigate();
+
+  // Forgot password state
+  const [showReset, setShowReset]     = useState(false);
+  const [resetEmail, setResetEmail]   = useState("");
+  const [resetMsg, setResetMsg]       = useState("");
+  const [resetErr, setResetErr]       = useState("");
+  const [resetLoading, setResetLoading] = useState(false);
 
   const getGreeting = () => {
     const h = new Date().getHours();
@@ -62,6 +76,33 @@ function Login() {
     setLoading(false);
   };
 
+  const handleForgotPassword = () => {
+    setShowReset(true);
+    setResetEmail(email); // pre-fill with whatever they typed in the main email field
+    setResetMsg("");
+    setResetErr("");
+  };
+
+  const handleSendReset = async () => {
+    setResetMsg("");
+    setResetErr("");
+    if (!resetEmail) { setResetErr("Please enter your email address."); return; }
+    setResetLoading(true);
+    try {
+      await sendPasswordResetEmail(auth, resetEmail);
+      setResetMsg("Reset link sent! Check your email inbox (and spam folder).");
+    } catch (e) {
+      if (e.code === "auth/user-not-found") {
+        setResetErr("No account found with that email.");
+      } else if (e.code === "auth/invalid-email") {
+        setResetErr("Please enter a valid email address.");
+      } else {
+        setResetErr("Something went wrong. Please try again.");
+      }
+    }
+    setResetLoading(false);
+  };
+
   return (
     <>
       <style>{styles}</style>
@@ -82,31 +123,63 @@ function Login() {
             </div>
           </div>
 
-          {error && <div className="error">⚠️ {error}</div>}
+          {!showReset && (
+            <>
+              {error && <div className="error">⚠️ {error}</div>}
 
-          <div className="field">
-            <label>Email Address</label>
-            <input type="email" placeholder="Enter your email" value={email} onChange={e => setEmail(e.target.value)}/>
-          </div>
-          <div className="field">
-            <label>Password</label>
-            <input type="password" placeholder="Enter your password" value={password} onChange={e => setPassword(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && handleLogin()}/>
-          </div>
+              <div className="field">
+                <label>Email Address</label>
+                <input type="email" placeholder="Enter your email" value={email} onChange={e => setEmail(e.target.value)}/>
+              </div>
+              <div className="field">
+                <label>Password</label>
+                <input type="password" placeholder="Enter your password" value={password} onChange={e => setPassword(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && handleLogin()}/>
+              </div>
 
-          <button className="btn" onClick={handleLogin} disabled={loading}>
-            {loading ? "Signing in..." : "Sign In →"}
-          </button>
+              <div className="forgot-link">
+                <a onClick={handleForgotPassword}>Forgot password?</a>
+              </div>
 
-          <div className="divider">
-            <div className="divider-line"/>
-            <div className="divider-text">New to Smart Energy System?</div>
-            <div className="divider-line"/>
-          </div>
+              <button className="btn" onClick={handleLogin} disabled={loading}>
+                {loading ? "Signing in..." : "Sign In →"}
+              </button>
 
-          <div className="link">
-            <a onClick={() => navigate("/register")}>Create a new account →</a>
-          </div>
+              <div className="divider">
+                <div className="divider-line"/>
+                <div className="divider-text">New to Smart Energy System?</div>
+                <div className="divider-line"/>
+              </div>
+
+              <div className="link">
+                <a onClick={() => navigate("/register")}>Create a new account →</a>
+              </div>
+            </>
+          )}
+
+          {showReset && (
+            <div className="reset-box">
+              <div className="reset-title">🔑 Reset Your Password</div>
+
+              {resetErr && <div className="error">⚠️ {resetErr}</div>}
+              {resetMsg && <div className="success">✅ {resetMsg}</div>}
+
+              <div className="field">
+                <label>Email Address</label>
+                <input type="email" placeholder="Enter your account email" value={resetEmail}
+                  onChange={e => setResetEmail(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && handleSendReset()}/>
+              </div>
+
+              <button className="btn" onClick={handleSendReset} disabled={resetLoading}>
+                {resetLoading ? "Sending..." : "Send Reset Link"}
+              </button>
+
+              <button className="btn btn-secondary" onClick={() => setShowReset(false)}>
+                ← Back to Sign In
+              </button>
+            </div>
+          )}
 
         </div>
       </div>
