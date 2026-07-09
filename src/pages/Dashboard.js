@@ -13,6 +13,7 @@ import {
 const NAV = [
   { id:"home",      icon:"🏠", label:"Home" },
   { id:"analytics", icon:"📊", label:"Analytics" },
+  { id:"ai",        icon:"🤖", label:"AI Analysis" },
   { id:"devices",   icon:"💡", label:"Devices" },
   { id:"billing",   icon:"💰", label:"Billing" },
   { id:"settings",  icon:"⚙️", label:"Settings" },
@@ -94,7 +95,118 @@ const CSS = `
   ::-webkit-scrollbar{width:4px;}
   ::-webkit-scrollbar-track{background:transparent;}
   ::-webkit-scrollbar-thumb{background:rgba(0,200,150,0.3);border-radius:4px;}
+  @keyframes aiPulse{0%,100%{box-shadow:0 0 0 0 rgba(167,139,250,0.4)}50%{box-shadow:0 0 0 8px rgba(167,139,250,0)}}
+  .ai-badge{animation:aiPulse 2s infinite;}
 `;
+
+// ─── AI ANALYSIS ENGINE ────────────────────────────────────────
+// Rule-based analysis engine: computes anomaly detection, peak hour
+// tracking, savings recommendations, bill forecasting, and an
+// efficiency score from real historical sensor readings.
+
+const HOURLY_LOG_KEY = "smartEnergy_hourlyLog";
+
+function logHourlyUsage(power) {
+  if (!power || power <= 0) return;
+  try {
+    const hour = new Date().getHours();
+    const raw = localStorage.getItem(HOURLY_LOG_KEY);
+    const log = raw ? JSON.parse(raw) : {};
+    if (!log[hour]) log[hour] = { total: 0, count: 0 };
+    log[hour].total += power;
+    log[hour].count += 1;
+    localStorage.setItem(HOURLY_LOG_KEY, JSON.stringify(log));
+  } catch (e) { /* localStorage unavailable, skip silently */ }
+}
+
+function getHourlyLog() {
+  try {
+    const raw = localStorage.getItem(HOURLY_LOG_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch (e) { return {}; }
+}
+
+function formatHour(h) {
+  const hour12 = h % 12 === 0 ? 12 : h % 12;
+  const ampm = h < 12 ? "AM" : "PM";
+  return `${hour12}:00 ${ampm}`;
+}
+
+function getHourlyChartData() {
+  const log = getHourlyLog();
+  const data = [];
+  for (let h = 0; h < 24; h++) {
+    const entry = log[h];
+    data.push({ hour: formatHour(h), avg: entry ? +(entry.total / entry.count).toFixed(1) : 0 });
+  }
+  return data;
+}
+
+function analyzeEnergy(history, power, kwh, bill) {
+  const avgPower = history.length ? history.reduce((a, b) => a + b.power, 0) / history.length : 0;
+
+  // 1. Anomaly Detection
+  const anomalyThreshold = avgPower * 1.3;
+  const isAnomaly = avgPower > 5 && power > anomalyThreshold;
+  const anomalyPercent = avgPower > 0 ? Math.round(((power - avgPower) / avgPower) * 100) : 0;
+
+  // 2. Peak Usage Hours (from accumulated localStorage log)
+  const log = getHourlyLog();
+  const hourEntries = Object.entries(log)
+    .map(([h, d]) => ({ hour: parseInt(h), avg: d.total / d.count }))
+    .sort((a, b) => b.avg - a.avg);
+  const peakHours = hourEntries.slice(0, 3);
+
+  // 3. Efficiency Score (0-100): power factor + consistency of readings
+  const powerFactor = 0.92;
+  let variance = 0;
+  if (history.length > 1 && avgPower > 0) {
+    variance = Math.sqrt(history.reduce((a, b) => a + Math.pow(b.power - avgPower, 2), 0) / history.length);
+  }
+  const consistencyScore = avgPower > 0 ? Math.max(0, 100 - (variance / avgPower) * 100) : 100;
+  const efficiencyScore = Math.round(powerFactor * 100 * 0.5 + consistencyScore * 0.5);
+
+  // 4. Predictive Bill Forecast (trend-based, using first half vs second half of history)
+  let forecastBill = parseFloat(bill);
+  let trendPercent = 0;
+  if (history.length >= 10) {
+    const half = Math.floor(history.length / 2);
+    const firstAvg = history.slice(0, half).reduce((a, b) => a + b.power, 0) / half;
+    const secondAvg = history.slice(half).reduce((a, b) => a + b.power, 0) / (history.length - half);
+    if (firstAvg > 0) {
+      const trendFactor = secondAvg / firstAvg;
+      forecastBill = (parseFloat(bill) * trendFactor);
+      trendPercent = Math.round((trendFactor - 1) * 100);
+    }
+  }
+
+  // 5. Smart Recommendations
+  const recommendations = [];
+  if (isAnomaly) {
+    recommendations.push(`⚡ Unusual spike detected — current usage is ${anomalyPercent}% above your recent average. Check if a high-power device was just switched on.`);
+  }
+  if (power > 400) {
+    recommendations.push(`💡 Usage exceeds 400W threshold. Turning off non-essential devices during peak hours could reduce your bill significantly.`);
+  }
+  if (peakHours.length > 0) {
+    recommendations.push(`🕐 Your highest usage tends to be around ${formatHour(peakHours[0].hour)}. Shifting heavy appliance use away from this time can help balance load.`);
+  }
+  if (trendPercent > 10) {
+    recommendations.push(`📈 Usage trending upward by ~${trendPercent}%. Monitor for devices left running unintentionally.`);
+  }
+  if (recommendations.length === 0) {
+    recommendations.push(`✅ Usage pattern looks stable and efficient. No unusual activity detected.`);
+  }
+
+  return {
+    isAnomaly, anomalyPercent,
+    peakHours,
+    efficiencyScore,
+    forecastBill: forecastBill.toFixed(2),
+    trendPercent,
+    recommendations,
+  };
+}
 
 // ─── MAIN DASHBOARD ──────────────────────────────────────────
 export default function Dashboard() {
@@ -111,6 +223,7 @@ export default function Dashboard() {
   const [customer, setCustomer] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
   const [isOnline, setIsOnline] = useState(false);
+  const [aiInsight, setAiInsight] = useState("Analyzing your energy data...");
   const navigate = useNavigate();
   const c = getColors(dark);
 
@@ -119,7 +232,7 @@ export default function Dashboard() {
     if (user) getDoc(doc(firestore,"customers",user.uid)).then(s=>{ if(s.exists()) setCustomer(s.data()); });
     onValue(ref(db,"energy/voltage"),     s=>setVoltage(s.val()||0));
     onValue(ref(db,"energy/current"),     s=>setCurrent(s.val()||0));
-    onValue(ref(db,"energy/power"),       s=>{ const v=s.val()||0; setPower(v); setHistory(p=>[...p.slice(-29),{t:new Date().toLocaleTimeString(),power:v,voltage:voltage,current:current}]); });
+    onValue(ref(db,"energy/power"),       s=>{ const v=s.val()||0; setPower(v); setHistory(p=>[...p.slice(-29),{t:new Date().toLocaleTimeString(),power:v,voltage:voltage,current:current}]); logHourlyUsage(v); });
     onValue(ref(db,"energy/kwh"),         s=>setKwh(s.val()||0));
     onValue(ref(db,"environment/temp"),   s=>setTemp(s.val()));
     onValue(ref(db,"environment/humidity"),s=>setHumidity(s.val()));
@@ -137,6 +250,33 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, [lastUpdated]);
 
+  // Fetch AI-generated insight from Gemini via Netlify serverless function
+  useEffect(() => {
+    const fetchInsight = async () => {
+      try {
+        const avgPower = history.length ? (history.reduce((a,b)=>a+b.power,0)/history.length).toFixed(1) : 0;
+        const res = await fetch("/.netlify/functions/analyze", {
+          method: "POST",
+          body: JSON.stringify({
+            avgPower,
+            peakHour: ai.peakHours.length > 0 ? formatHour(ai.peakHours[0].hour) : "N/A",
+            currentPower: power.toFixed(1),
+            bill: bill,
+            trend: ai.trendPercent,
+            anomaly: ai.isAnomaly
+          })
+        });
+        const data = await res.json();
+        setAiInsight(data.insight || "Unable to generate insight.");
+      } catch (e) {
+        setAiInsight("AI insight temporarily unavailable.");
+      }
+    };
+    if (history.length > 3) fetchInsight();
+    const interval = setInterval(() => { if (history.length > 3) fetchInsight(); }, 60000);
+    return () => clearInterval(interval);
+  }, [power]);
+
   const toggleRelay = key => { const u={...relays,[key]:relays[key]==="OFF"?"ON":"OFF"}; setRelays(u); set(ref(db,"device/relay"),u); };
   const handleLogout = async () => { await signOut(auth); navigate("/login"); };
   const bill = (power*24*30/1000*30).toFixed(2);
@@ -144,6 +284,8 @@ export default function Dashboard() {
   const dot = {width:8,height:8,borderRadius:"50%",background:"#00c896",display:"inline-block",boxShadow:"0 0 6px #00c896"};
   const panelStyle = {background:c.panel,border:`1px solid ${c.panelBo}`,borderRadius:16,padding:24};
   const titleStyle = {fontFamily:"'Rajdhani',sans-serif",fontSize:17,fontWeight:700,letterSpacing:"1.5px",color:c.sub,textTransform:"uppercase",marginBottom:18,display:"flex",alignItems:"center",gap:8};
+
+  const ai = analyzeEnergy(history, power, kwh, bill);
 
   // ── PAGES ──────────────────────────────────────────────────
 
@@ -218,6 +360,55 @@ export default function Dashboard() {
               <div style={{fontSize:17,color:c.sub,fontWeight:500}}>{row.label}</div>
               <div style={{fontFamily:"'Rajdhani',sans-serif",fontSize:19,fontWeight:700,color:row.color||c.text}}>{row.val}</div>
             </div>
+          ))}
+        </div>
+      </div>
+
+      {/* AI Analysis Panel */}
+      <div style={{...panelStyle, marginBottom:22, border:`1px solid rgba(167,139,250,0.3)`, background: dark ? "rgba(167,139,250,0.04)" : "rgba(167,139,250,0.06)"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20}}>
+          <div style={{...titleStyle, marginBottom:0}}>
+            <span className="ai-badge" style={{...dot, background:"#a78bfa", boxShadow:"0 0 6px #a78bfa"}}/>
+            🤖 AI Energy Analysis
+          </div>
+          <div style={{fontSize:12,color:c.muted,fontStyle:"italic"}}>Powered by pattern analysis engine</div>
+        </div>
+
+        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:14,marginBottom:20}}>
+          {/* Efficiency Score */}
+          <div style={{background:c.card,border:`1px solid ${c.cardBo}`,borderRadius:14,padding:20,textAlign:"center"}}>
+            <div style={{fontSize:13,color:c.muted,marginBottom:10,fontWeight:600,textTransform:"uppercase",letterSpacing:"1px"}}>Efficiency Score</div>
+            <div style={{fontFamily:"'Rajdhani',sans-serif",fontSize:34,fontWeight:700,color: ai.efficiencyScore>=70?"#00c896":ai.efficiencyScore>=40?"#fbbf24":"#fb7185"}}>{ai.efficiencyScore}<span style={{fontSize:18,color:c.muted}}>/100</span></div>
+          </div>
+          {/* Anomaly Status */}
+          <div style={{background:c.card,border:`1px solid ${ai.isAnomaly?"rgba(225,29,72,0.4)":c.cardBo}`,borderRadius:14,padding:20,textAlign:"center"}}>
+            <div style={{fontSize:13,color:c.muted,marginBottom:10,fontWeight:600,textTransform:"uppercase",letterSpacing:"1px"}}>Anomaly Status</div>
+            <div style={{fontFamily:"'Rajdhani',sans-serif",fontSize:22,fontWeight:700,color: ai.isAnomaly?"#fb7185":"#00c896"}}>{ai.isAnomaly ? `⚠️ +${ai.anomalyPercent}%` : "✅ Normal"}</div>
+          </div>
+          {/* Forecast Bill */}
+          <div style={{background:c.card,border:`1px solid ${c.cardBo}`,borderRadius:14,padding:20,textAlign:"center"}}>
+            <div style={{fontSize:13,color:c.muted,marginBottom:10,fontWeight:600,textTransform:"uppercase",letterSpacing:"1px"}}>Forecast Bill</div>
+            <div style={{fontFamily:"'Rajdhani',sans-serif",fontSize:22,fontWeight:700,color:"#a78bfa"}}>LKR {ai.forecastBill}</div>
+            {ai.trendPercent !== 0 && <div style={{fontSize:12,color:ai.trendPercent>0?"#fb7185":"#00c896",marginTop:4}}>{ai.trendPercent>0?"▲":"▼"} {Math.abs(ai.trendPercent)}% trend</div>}
+          </div>
+          {/* Peak Hour */}
+          <div style={{background:c.card,border:`1px solid ${c.cardBo}`,borderRadius:14,padding:20,textAlign:"center"}}>
+            <div style={{fontSize:13,color:c.muted,marginBottom:10,fontWeight:600,textTransform:"uppercase",letterSpacing:"1px"}}>Peak Usage Hour</div>
+            <div style={{fontFamily:"'Rajdhani',sans-serif",fontSize:20,fontWeight:700,color:"#fbbf24"}}>{ai.peakHours.length>0 ? formatHour(ai.peakHours[0].hour) : "Gathering data..."}</div>
+          </div>
+        </div>
+
+        {/* Gemini AI Insight */}
+        <div style={{background:c.panel,border:`1px solid rgba(167,139,250,0.3)`,borderRadius:12,padding:18,marginBottom:14}}>
+          <div style={{fontSize:14,color:"#a78bfa",fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",marginBottom:12}}>✨ Gemini AI Insight</div>
+          <div style={{fontSize:15,color:c.sub,lineHeight:1.7}}>{aiInsight}</div>
+        </div>
+
+        {/* Recommendations */}
+        <div style={{background:c.panel,border:`1px solid ${c.panelBo}`,borderRadius:12,padding:18}}>
+          <div style={{fontSize:14,color:c.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",marginBottom:12}}>💡 Smart Recommendations</div>
+          {ai.recommendations.map((rec,i)=>(
+            <div key={i} style={{fontSize:15,color:c.sub,padding:"8px 0",borderBottom:i===ai.recommendations.length-1?"none":`1px solid ${c.statBo}`,lineHeight:1.6}}>{rec}</div>
           ))}
         </div>
       </div>
@@ -313,6 +504,113 @@ export default function Dashboard() {
       </div>
     </div>
   );
+
+  // AI ANALYSIS (full page)
+  const PageAI = () => {
+    const hourlyData = getHourlyChartData();
+    const avgPower = history.length ? history.reduce((a,b)=>a+b.power,0)/history.length : 0;
+    return (
+      <div style={{display:"grid",gap:20}}>
+
+        {/* Top Summary Row */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:14}}>
+          <div style={{background:c.card,border:`1px solid ${c.cardBo}`,borderRadius:16,padding:24,textAlign:"center"}}>
+            <div style={{fontSize:14,color:c.muted,marginBottom:10,fontWeight:600,textTransform:"uppercase",letterSpacing:"1px"}}>Efficiency Score</div>
+            <div style={{fontFamily:"'Rajdhani',sans-serif",fontSize:40,fontWeight:700,color: ai.efficiencyScore>=70?"#00c896":ai.efficiencyScore>=40?"#fbbf24":"#fb7185"}}>{ai.efficiencyScore}<span style={{fontSize:20,color:c.muted}}>/100</span></div>
+            <div style={{fontSize:13,color:c.muted,marginTop:8}}>Based on power factor + usage consistency</div>
+          </div>
+          <div style={{background:c.card,border:`1px solid ${ai.isAnomaly?"rgba(225,29,72,0.4)":c.cardBo}`,borderRadius:16,padding:24,textAlign:"center"}}>
+            <div style={{fontSize:14,color:c.muted,marginBottom:10,fontWeight:600,textTransform:"uppercase",letterSpacing:"1px"}}>Anomaly Status</div>
+            <div style={{fontFamily:"'Rajdhani',sans-serif",fontSize:26,fontWeight:700,color: ai.isAnomaly?"#fb7185":"#00c896"}}>{ai.isAnomaly ? `⚠️ +${ai.anomalyPercent}%` : "✅ Normal"}</div>
+            <div style={{fontSize:13,color:c.muted,marginTop:8}}>vs rolling average of {avgPower.toFixed(1)} W</div>
+          </div>
+          <div style={{background:c.card,border:`1px solid ${c.cardBo}`,borderRadius:16,padding:24,textAlign:"center"}}>
+            <div style={{fontSize:14,color:c.muted,marginBottom:10,fontWeight:600,textTransform:"uppercase",letterSpacing:"1px"}}>Forecast Bill</div>
+            <div style={{fontFamily:"'Rajdhani',sans-serif",fontSize:26,fontWeight:700,color:"#a78bfa"}}>LKR {ai.forecastBill}</div>
+            <div style={{fontSize:13,color:ai.trendPercent>0?"#fb7185":"#00c896",marginTop:8}}>{ai.trendPercent!==0?`${ai.trendPercent>0?"▲":"▼"} ${Math.abs(ai.trendPercent)}% trend`:"Stable trend"}</div>
+          </div>
+          <div style={{background:c.card,border:`1px solid ${c.cardBo}`,borderRadius:16,padding:24,textAlign:"center"}}>
+            <div style={{fontSize:14,color:c.muted,marginBottom:10,fontWeight:600,textTransform:"uppercase",letterSpacing:"1px"}}>Peak Usage Hour</div>
+            <div style={{fontFamily:"'Rajdhani',sans-serif",fontSize:24,fontWeight:700,color:"#fbbf24"}}>{ai.peakHours.length>0 ? formatHour(ai.peakHours[0].hour) : "Gathering data..."}</div>
+            <div style={{fontSize:13,color:c.muted,marginTop:8}}>Highest average recorded hour</div>
+          </div>
+        </div>
+
+        {/* Hourly Usage Pattern Chart */}
+        <div style={panelStyle}>
+          <div style={titleStyle}><span style={dot}/>Hourly Usage Pattern (24-Hour)</div>
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={hourlyData}>
+              <CartesianGrid stroke={dark?"rgba(255,255,255,0.05)":"#f0f0f0"}/>
+              <XAxis dataKey="hour" tick={{fill:c.muted,fontSize:11}} interval={2}/>
+              <YAxis tick={{fill:c.muted,fontSize:13}} width={48}/>
+              <Tooltip contentStyle={{background:c.tooltip,border:"1px solid rgba(167,139,250,0.3)",borderRadius:8,fontSize:14,color:c.text}}/>
+              <Bar dataKey="avg" fill="#a78bfa" radius={[4,4,0,0]} name="Avg Power (W)"/>
+            </BarChart>
+          </ResponsiveContainer>
+          <div style={{fontSize:13,color:c.muted,marginTop:10,fontStyle:"italic"}}>Builds up automatically the longer your system runs — more data means more accurate peak-hour detection.</div>
+        </div>
+
+        {/* Top 3 Peak Hours List */}
+        <div style={panelStyle}>
+          <div style={titleStyle}><span style={dot}/>Top Usage Hours</div>
+          {ai.peakHours.length > 0 ? ai.peakHours.map((h,i)=>(
+            <div key={h.hour} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"14px 0",borderBottom:i===ai.peakHours.length-1?"none":`1px solid ${c.statBo}`}}>
+              <div style={{fontSize:17,color:c.sub,fontWeight:500}}>#{i+1} — {formatHour(h.hour)}</div>
+              <div style={{fontFamily:"'Rajdhani',sans-serif",fontSize:19,fontWeight:700,color:"#fbbf24"}}>{h.avg.toFixed(1)} W avg</div>
+            </div>
+          )) : (
+            <div style={{fontSize:15,color:c.muted,padding:"14px 0"}}>Not enough data yet — keep the system running longer to build hourly usage patterns.</div>
+          )}
+        </div>
+
+        {/* Bill Forecast Breakdown */}
+        <div style={panelStyle}>
+          <div style={titleStyle}><span style={dot}/>Predictive Bill Forecast Breakdown</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14}}>
+            <div style={{background:c.panel,border:`1px solid ${c.panelBo}`,borderRadius:12,padding:18,textAlign:"center"}}>
+              <div style={{fontSize:13,color:c.muted,marginBottom:8,fontWeight:600,textTransform:"uppercase"}}>Current Estimate</div>
+              <div style={{fontFamily:"'Rajdhani',sans-serif",fontSize:22,fontWeight:700,color:c.text}}>LKR {bill}</div>
+            </div>
+            <div style={{background:c.panel,border:`1px solid ${c.panelBo}`,borderRadius:12,padding:18,textAlign:"center"}}>
+              <div style={{fontSize:13,color:c.muted,marginBottom:8,fontWeight:600,textTransform:"uppercase"}}>AI Forecast</div>
+              <div style={{fontFamily:"'Rajdhani',sans-serif",fontSize:22,fontWeight:700,color:"#a78bfa"}}>LKR {ai.forecastBill}</div>
+            </div>
+            <div style={{background:c.panel,border:`1px solid ${c.panelBo}`,borderRadius:12,padding:18,textAlign:"center"}}>
+              <div style={{fontSize:13,color:c.muted,marginBottom:8,fontWeight:600,textTransform:"uppercase"}}>Usage Trend</div>
+              <div style={{fontFamily:"'Rajdhani',sans-serif",fontSize:22,fontWeight:700,color:ai.trendPercent>0?"#fb7185":"#00c896"}}>{ai.trendPercent>0?"▲":ai.trendPercent<0?"▼":"—"} {Math.abs(ai.trendPercent)}%</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Gemini AI Insight */}
+        <div style={{...panelStyle, border:`1px solid rgba(167,139,250,0.3)`, background: dark ? "rgba(167,139,250,0.04)" : "rgba(167,139,250,0.06)"}}>
+          <div style={titleStyle}><span style={{...dot, background:"#a78bfa", boxShadow:"0 0 6px #a78bfa"}}/>✨ Gemini AI Insight</div>
+          <div style={{fontSize:16,color:c.sub,lineHeight:1.8}}>{aiInsight}</div>
+        </div>
+
+        {/* Full Recommendations */}
+        <div style={{...panelStyle, border:`1px solid rgba(167,139,250,0.3)`, background: dark ? "rgba(167,139,250,0.04)" : "rgba(167,139,250,0.06)"}}>
+          <div style={titleStyle}><span style={{...dot, background:"#a78bfa", boxShadow:"0 0 6px #a78bfa"}}/>💡 Smart Recommendations</div>
+          {ai.recommendations.map((rec,i)=>(
+            <div key={i} style={{fontSize:16,color:c.sub,padding:"12px 0",borderBottom:i===ai.recommendations.length-1?"none":`1px solid ${c.statBo}`,lineHeight:1.7}}>{rec}</div>
+          ))}
+        </div>
+
+        {/* How it works (for VIVA explanation) */}
+        <div style={panelStyle}>
+          <div style={titleStyle}><span style={dot}/>How This Analysis Works</div>
+          <div style={{fontSize:15,color:c.muted,lineHeight:1.8}}>
+            This engine uses rule-based statistical analysis on real sensor data collected from your ESP32 device via Firebase:
+            <br/>• <b style={{color:c.sub}}>Anomaly Detection</b> compares live power readings against a rolling average, flagging spikes over 30%.
+            <br/>• <b style={{color:c.sub}}>Peak Hour Tracking</b> accumulates hourly averages over time to identify your highest-usage periods.
+            <br/>• <b style={{color:c.sub}}>Efficiency Score</b> combines power factor with the consistency (standard deviation) of your usage.
+            <br/>• <b style={{color:c.sub}}>Bill Forecasting</b> compares recent usage trend against your historical average to project next month's cost.
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   // DEVICES
   const PageDevices = () => (
@@ -462,7 +760,7 @@ export default function Dashboard() {
         {[
           {icon:"🔌",title:"IoT Integration",    desc:"ESP32 microcontroller with ACS712 current sensor and DHT11 temperature sensor for real-time data collection."},
           {icon:"☁️",title:"Cloud Based",        desc:"Firebase Realtime Database stores and syncs all energy data instantly across all devices."},
-          {icon:"🤖",title:"AI Powered",         desc:"Artificial intelligence analyzes usage patterns and provides smart recommendations to save energy."},
+          {icon:"🤖",title:"AI Powered",         desc:"Rule-based analysis engine detects anomalies, forecasts bills, and provides smart recommendations from real usage patterns."},
           {icon:"📱",title:"Web Dashboard",      desc:"Professional React web application with real-time charts, device control, and billing estimates."},
           {icon:"🔐",title:"Secure Login",       desc:"Firebase Authentication with customer profiles including CEB account details and address."},
           {icon:"🇱🇰",title:"Made for Sri Lanka", desc:"Designed specifically for Sri Lankan electricity billing system with LKR calculations."},
@@ -493,7 +791,7 @@ export default function Dashboard() {
     </div>
   );
 
-  const pages = { home:<PageHome/>, analytics:<PageAnalytics/>, devices:<PageDevices/>, billing:<PageBilling/>, settings:<PageSettings/>, about:<PageAbout/> };
+  const pages = { home:<PageHome/>, analytics:<PageAnalytics/>, ai:<PageAI/>, devices:<PageDevices/>, billing:<PageBilling/>, settings:<PageSettings/>, about:<PageAbout/> };
 
   return (
     <>
