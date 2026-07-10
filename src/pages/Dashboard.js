@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { db, auth, firestore } from "../firebase/firebase";
 import { ref, onValue, set } from "firebase/database";
 import { signOut } from "firebase/auth";
@@ -227,15 +227,17 @@ export default function Dashboard() {
   const [lastUpdated, setLastUpdated] = useState(null);
   const [isOnline, setIsOnline] = useState(false);
   const [aiInsight, setAiInsight] = useState("Analyzing your energy data...");
+  const voltageRef = useRef(0);
+  const currentRef = useRef(0);
   const navigate = useNavigate();
   const c = getColors(dark);
 
   useEffect(() => {
     const user = auth.currentUser;
     if (user) getDoc(doc(firestore,"customers",user.uid)).then(s=>{ if(s.exists()) setCustomer(s.data()); });
-    onValue(ref(db,"energy/voltage"),     s=>setVoltage(s.val()||0));
-    onValue(ref(db,"energy/current"),     s=>setCurrent(s.val()||0));
-    onValue(ref(db,"energy/power"),       s=>{ const v=s.val()||0; setPower(v); setHistory(p=>[...p.slice(-29),{t:new Date().toLocaleTimeString(),power:v,voltage:voltage,current:current}]); logHourlyUsage(v); });
+    onValue(ref(db,"energy/voltage"),     s=>{ const v=s.val()||0; setVoltage(v); voltageRef.current=v; });
+    onValue(ref(db,"energy/current"),     s=>{ const v=s.val()||0; setCurrent(v); currentRef.current=v; });
+    onValue(ref(db,"energy/power"),       s=>{ const v=s.val()||0; setPower(v); setHistory(p=>[...p.slice(-29),{t:new Date().toLocaleTimeString(),power:v,voltage:voltageRef.current,current:currentRef.current}]); logHourlyUsage(v); });
     onValue(ref(db,"energy/kwh"),         s=>setKwh(s.val()||0));
     onValue(ref(db,"environment/temp"),   s=>setTemp(s.val()));
     onValue(ref(db,"environment/humidity"),s=>setHumidity(s.val()));
