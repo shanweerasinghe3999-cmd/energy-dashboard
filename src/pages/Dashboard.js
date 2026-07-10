@@ -74,6 +74,9 @@ const CARD_COLORS = {
   humidity: { val:"#38bdf8", top:"linear-gradient(90deg,#0284c7,#38bdf8)" },
 };
 
+// Sri Lanka CEB domestic electricity rate (LKR per kWh/unit)
+const RATE_PER_KWH = 2.50;
+
 // ─── SHARED STYLES ────────────────────────────────────────────
 const CSS = `
   @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=DM+Sans:wght@400;500;600&display=swap');
@@ -279,7 +282,7 @@ export default function Dashboard() {
 
   const toggleRelay = key => { const u={...relays,[key]:relays[key]==="OFF"?"ON":"OFF"}; setRelays(u); set(ref(db,"device/relay"),u); };
   const handleLogout = async () => { await signOut(auth); navigate("/login"); };
-  const bill = (power*24*30/1000*30).toFixed(2);
+  const bill = (power*24*30/1000*RATE_PER_KWH).toFixed(2);
   const maxPow = Math.max(...history.map(h=>h.power),1);
   const dot = {width:8,height:8,borderRadius:"50%",background:"#00c896",display:"inline-block",boxShadow:"0 0 6px #00c896"};
   const panelStyle = {background:c.panel,border:`1px solid ${c.panelBo}`,borderRadius:16,padding:24};
@@ -652,10 +655,10 @@ export default function Dashboard() {
 
   // BILLING
   const PageBilling = () => {
-    const daily   = (power*24/1000*30).toFixed(2);
-    const weekly  = (power*24*7/1000*30).toFixed(2);
+    const daily   = (power*24/1000*RATE_PER_KWH).toFixed(2);
+    const weekly  = (power*24*7/1000*RATE_PER_KWH).toFixed(2);
     const monthly = bill;
-    const yearly  = (power*24*365/1000*30).toFixed(2);
+    const yearly  = (power*24*365/1000*RATE_PER_KWH).toFixed(2);
     return (
       <div style={{display:"grid",gap:20}}>
         <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:14}}>
@@ -676,7 +679,7 @@ export default function Dashboard() {
           {[
             {label:"Current Power Usage",      val:`${power.toFixed(1)} W`},
             {label:"Energy Consumed",          val:`${kwh.toFixed(3)} kWh`},
-            {label:"Rate per kWh",             val:"LKR 30.00"},
+            {label:"Rate per kWh",             val:`LKR ${RATE_PER_KWH.toFixed(2)}`},
             {label:"CEB Account Number",       val:customer?.accountNumber||"--"},
             {label:"Customer Name",            val:customer?.fullName||"--"},
             {label:"Service Address",          val:customer?`${customer.address}, ${customer.city}`:"--"},
@@ -689,7 +692,7 @@ export default function Dashboard() {
         </div>
         {power>400&&(
           <div style={{background:"rgba(225,29,72,0.1)",border:"1px solid rgba(225,29,72,0.3)",borderRadius:14,padding:20}}>
-            <div style={{fontSize:18,color:"#fb7185",fontWeight:600}}>⚠️ Your current power usage ({power.toFixed(1)}W) is high. Reducing usage can save you LKR {((power-300)*24*30/1000*30).toFixed(0)} per month!</div>
+            <div style={{fontSize:18,color:"#fb7185",fontWeight:600}}>⚠️ Your current power usage ({power.toFixed(1)}W) is high. Reducing usage can save you LKR {((power-300)*24*30/1000*RATE_PER_KWH).toFixed(0)} per month!</div>
           </div>
         )}
       </div>
