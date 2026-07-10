@@ -256,8 +256,12 @@ export default function Dashboard() {
   }, [lastUpdated]);
 
   // Fetch AI-generated insight from Gemini via Netlify serverless function
+  // Runs once on mount, then every 60s — NOT tied to power updates (which
+  // happen every ~5s and would otherwise burn through the API quota).
   useEffect(() => {
     const fetchInsight = async () => {
+      const { history, power, bill, ai } = latestDataRef.current;
+      if (history.length <= 3) return;
       try {
         const avgPower = history.length ? (history.reduce((a,b)=>a+b.power,0)/history.length).toFixed(1) : 0;
         const res = await fetch("/.netlify/functions/analyze", {
@@ -277,10 +281,10 @@ export default function Dashboard() {
         setAiInsight("AI insight temporarily unavailable.");
       }
     };
-    if (history.length > 3) fetchInsight();
-    const interval = setInterval(() => { if (history.length > 3) fetchInsight(); }, 60000);
-    return () => clearInterval(interval);
-  }, [power]);
+    const initialTimeout = setTimeout(fetchInsight, 6000);
+    const interval = setInterval(fetchInsight, 60000);
+    return () => { clearTimeout(initialTimeout); clearInterval(interval); };
+  }, []);
 
   const toggleRelay = key => { const u={...relays,[key]:relays[key]==="OFF"?"ON":"OFF"}; setRelays(u); set(ref(db,"device/relay"),u); };
   const handleLogout = async () => { await signOut(auth); navigate("/login"); };
@@ -291,6 +295,8 @@ export default function Dashboard() {
   const titleStyle = {fontFamily:"'Rajdhani',sans-serif",fontSize:17,fontWeight:700,letterSpacing:"1.5px",color:c.sub,textTransform:"uppercase",marginBottom:18,display:"flex",alignItems:"center",gap:8};
 
   const ai = analyzeEnergy(history, power, kwh, bill);
+  const latestDataRef = useRef({ history, power, bill, ai });
+  latestDataRef.current = { history, power, bill, ai };
 
   // ── PAGES ──────────────────────────────────────────────────
 
