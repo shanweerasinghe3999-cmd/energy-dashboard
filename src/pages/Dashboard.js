@@ -276,9 +276,14 @@ export default function Dashboard() {
           })
         });
         const data = await res.json();
-        setAiInsight(data.insight || "Unable to generate insight.");
+        if (data.insight) {
+          setAiInsight(data.insight);
+        } else {
+          // Gemini unavailable (quota/network) — fall back to rule-based summary
+          setAiInsight(ai.recommendations.join(" "));
+        }
       } catch (e) {
-        setAiInsight("AI insight temporarily unavailable.");
+        setAiInsight(ai.recommendations.join(" "));
       }
     };
     const initialTimeout = setTimeout(fetchInsight, 6000);
